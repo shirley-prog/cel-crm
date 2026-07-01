@@ -101,7 +101,7 @@ const MAP_STATUS = {
 };
 
 const ORIGENS = ["Instagram/DM","WhatsApp direto","Indicação","Paciente da Base","Outros"];
-const ADMIN_EMAIL = "shirley@benettiangular.com.br";
+const ADMIN_EMAIL = "shirley@benettiangular.com";
 const WHATSAPP_SUPORTE = "5518998184929";
 const NOME_APP = "Cél";
 const SLOGAN_APP = "a maneira mais fácil de fazer vendas";
