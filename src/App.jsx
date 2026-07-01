@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 const SUPA_URL = "https://ctaxhvyepcbnjffmbudw.supabase.co";
 const SUPA_KEY = "sb_publishable_TMnCzqVpMzXhmWcE64zMUQ_36Cevv8t";
 
+// Chamada REST autenticada com token do usuário logado
 const apiFetch = async (path, options = {}, token = null) => {
   const headers = {
     "apikey": SUPA_KEY,
@@ -19,6 +20,7 @@ const apiFetch = async (path, options = {}, token = null) => {
   return text ? JSON.parse(text) : null;
 };
 
+// Auth via Supabase Auth API
 const authFetch = async (path, body) => {
   const res = await fetch(`${SUPA_URL}/auth/v1/${path}`, {
     method: "POST",
@@ -37,6 +39,25 @@ const supaAuth = {
     method: "POST",
     headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${token}` },
   }),
+  updateUser: async (token, campos) => {
+    const res = await fetch(`${SUPA_URL}/auth/v1/user`, {
+      method: "PUT",
+      headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(campos),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error_description || data.msg || "Erro ao atualizar usuário");
+    return data;
+  },
+  recover: async (email) => {
+    const res = await fetch(`${SUPA_URL}/auth/v1/recover`, {
+      method: "POST",
+      headers: { "apikey": SUPA_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error_description || d.msg || "Erro ao enviar e-mail"); }
+    return true;
+  },
 };
 
 // ─── PALETA ───────────────────────────────────────────────────────────────────
@@ -149,6 +170,7 @@ function Login({onLogin}){
     try {
       const data = await supaAuth.signIn(email, senha);
       const token = data.access_token;
+      // Buscar perfil com token do próprio usuário
       const perfis = await apiFetch(`perfis?id=eq.${data.user.id}&select=*`, {}, token);
       const perfil = perfis?.[0];
       if (!perfil) { setErro("Perfil não encontrado. Contate o suporte."); setLoading(false); return; }
@@ -247,6 +269,19 @@ function PainelAdmin({token,onLogout}){
     }catch(e){ alert("Erro ao atualizar."); }
   };
 
+  const [enviandoReset,setEnviandoReset]=useState({});
+  const handleEnviarReset=async(email,id)=>{
+    setEnviandoReset(s=>({...s,[id]:"loading"}));
+    try{
+      await supaAuth.recover(email);
+      setEnviandoReset(s=>({...s,[id]:"ok"}));
+      setTimeout(()=>setEnviandoReset(s=>({...s,[id]:null})),4000);
+    }catch(e){
+      setEnviandoReset(s=>({...s,[id]:"erro"}));
+      setTimeout(()=>setEnviandoReset(s=>({...s,[id]:null})),4000);
+    }
+  };
+
   const visiveis=perfis.filter(p=>{
     if(p.email===ADMIN_EMAIL) return false;
     if(filtroStatus!=="todos"&&p.status!==filtroStatus) return false;
@@ -290,6 +325,9 @@ function PainelAdmin({token,onLogout}){
                     {p.status==="ativo"&&<button onClick={()=>atualizar(p.id,{status:"suspenso"})} style={{padding:"7px 14px",border:`1px solid #C0392B44`,borderRadius:8,background:"transparent",color:"#C0392B",fontSize:12,cursor:"pointer"}}>Suspender</button>}
                     {p.status==="suspenso"&&<button onClick={()=>atualizar(p.id,{status:"ativo"})} style={{padding:"7px 14px",border:"none",borderRadius:8,background:"#4A9B6F",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Reativar</button>}
                     <button onClick={()=>{setEditandoMsg(p.id);setMsgTemp(p.bloqueio_msg||MSG_BLOQUEIO_DEFAULT);}} style={{padding:"7px 14px",border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",color:C.muted,fontSize:12,cursor:"pointer"}}>✏ Mensagem</button>
+                    <button onClick={()=>handleEnviarReset(p.email,p.id)} disabled={enviandoReset[p.id]==="loading"} style={{padding:"7px 14px",border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",color:enviandoReset[p.id]==="ok"?"#4A9B6F":enviandoReset[p.id]==="erro"?"#C0392B":C.muted,fontSize:12,cursor:"pointer"}}>
+                      {enviandoReset[p.id]==="loading"?"Enviando...":(enviandoReset[p.id]==="ok"?"✓ E-mail enviado":(enviandoReset[p.id]==="erro"?"Erro":"🔑 Redefinir senha"))}
+                    </button>
                   </div>
                 </div>
                 {editandoMsg===p.id&&<div style={{marginTop:14,padding:14,background:C.offWhite,borderRadius:8,border:`1px solid ${C.border}`}}>
@@ -545,6 +583,24 @@ function CRM({perfil,token,onLogout}){
 
   const handleLogout=async()=>{ await supaAuth.signOut(token); onLogout(); };
 
+  const [alterandoSenha,setAlterandoSenha]=useState(false);
+  const [novaSenha,setNovaSenha]=useState("");
+  const [senhaMsg,setSenhaMsg]=useState("");
+  const [senhaErro,setSenhaErro]=useState("");
+  const [senhaLoading,setSenhaLoading]=useState(false);
+
+  const handleAlterarSenha=async()=>{
+    setSenhaErro(""); setSenhaMsg("");
+    if(novaSenha.length<6){setSenhaErro("A senha precisa ter pelo menos 6 caracteres.");return;}
+    setSenhaLoading(true);
+    try{
+      await supaAuth.updateUser(token,{password:novaSenha});
+      setSenhaMsg("Senha alterada com sucesso!");
+      setNovaSenha("");
+    }catch(e){ setSenhaErro(e.message||"Erro ao alterar senha."); }
+    setSenhaLoading(false);
+  };
+
   const leadVazio={id:null,codigo:"",nome:"",telefone:"",origem:"Instagram/DM",etapa:"novo",ultima_interacao:hoje(),follow_up_data:hoje(),indice_follow_up:0,criado_em:hoje(),observacoes:"",dor:"",desejo:"",urgencia:"",historico:[]};
   const periodos=[{id:"hoje",label:"Hoje"},{id:"semana",label:"Semana"},{id:"mes",label:"Mês"},{id:"trim",label:"Trimestre"},{id:"ano",label:"Ano"},{id:"todos",label:"Tudo"}];
 
@@ -555,6 +611,7 @@ function CRM({perfil,token,onLogout}){
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           {followupsHoje.length>0&&<button onClick={()=>setAbaAtiva("followups")} style={{background:`${C.gold}22`,border:`1px solid ${C.gold}44`,borderRadius:20,padding:"4px 12px",fontSize:12,color:C.gold,fontWeight:700,cursor:"pointer"}}>{followupsHoje.length} follow-up{followupsHoje.length>1?"s":""} hoje</button>}
           <BotaoSuporte small/>
+          <button onClick={()=>{setAlterandoSenha(true);setSenhaMsg("");setSenhaErro("");setNovaSenha("");}} style={{background:"transparent",border:`1px solid ${C.bordo}55`,color:C.muted,padding:"5px 12px",borderRadius:6,fontSize:12,cursor:"pointer"}}>🔑 Senha</button>
           <button onClick={handleLogout} style={{background:"transparent",border:`1px solid ${C.bordo}55`,color:C.muted,padding:"5px 12px",borderRadius:6,fontSize:12,cursor:"pointer"}}>Sair</button>
         </div>
       </div>
@@ -620,6 +677,21 @@ function CRM({perfil,token,onLogout}){
       {leadSelecionado&&<ModalLead lead={leadSelecionado} onClose={()=>setLeadSelecionado(null)} onSave={salvarLead} onDelete={excluirLead}/>}
       {novoLead&&<ModalLead lead={leadVazio} onClose={()=>setNovoLead(false)} onSave={criarLead} onDelete={()=>setNovoLead(false)}/>}
       {importando&&<ModalImportar onClose={()=>setImportando(false)} onImportar={importarLeads} perfil={perfil} leadsExistentes={leads}/>}
+      {alterandoSenha&&(
+        <Modal onClose={()=>setAlterandoSenha(false)}>
+          <ModalHeader title="Alterar senha" sub={perfil.email} onClose={()=>setAlterandoSenha(false)}/>
+          <div style={{padding:24}}>
+            <label style={lStyle}>Nova senha</label>
+            <input type="password" value={novaSenha} onChange={e=>{setNovaSenha(e.target.value);setSenhaErro("");setSenhaMsg("");}} placeholder="mínimo 6 caracteres" style={{...iStyle,marginBottom:12}}/>
+            {senhaErro&&<div style={{color:"#C0392B",fontSize:13,marginBottom:12,padding:"9px 12px",background:"#C0392B11",borderRadius:8}}>{senhaErro}</div>}
+            {senhaMsg&&<div style={{color:"#4A9B6F",fontSize:13,marginBottom:12,padding:"9px 12px",background:"#4A9B6F11",borderRadius:8}}>✓ {senhaMsg}</div>}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setAlterandoSenha(false)} style={{padding:"9px 16px",border:`1px solid ${C.border}`,borderRadius:8,background:"transparent",color:C.muted,fontSize:13,cursor:"pointer"}}>Cancelar</button>
+              <button onClick={handleAlterarSenha} disabled={senhaLoading} style={{padding:"9px 20px",border:"none",borderRadius:8,background:`linear-gradient(135deg,${C.bordo},${C.vinho})`,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",opacity:senhaLoading?0.7:1}}>{senhaLoading?"Salvando...":"Alterar senha"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
